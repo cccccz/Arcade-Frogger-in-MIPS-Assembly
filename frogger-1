@@ -1,0 +1,1084 @@
+#####################################################################
+#
+# CSC258H5S Winter 2022 Assembly Final Project
+# University of Toronto, St. George
+#
+# Student: Zheng Chen, 1006322249
+#
+# Bitmap Display Configuration:
+# - Unit width in pixels: 8
+# - Unit height in pixels: 8
+# - Display width in pixels: 256
+# - Display height in pixels: 256
+# - Base Address for Display: 0x10008000 ($gp)
+#
+# Which milestone is reached in this submission?
+# (See the assignment handout for descriptions of the milestones)
+# - Milestone 1/2/3/4(choose the one the applies)
+#
+# Which approved additional features have been implemented?
+# (See the assignment handout for the list of additional features)
+# 1. display the number of lives remaining(ez)
+# 2. Make the frog point in the direction that it's travelling(ez)
+# 3. pause when p is pressed and return when p is pressed again(ez)
+# 4.time limit(ez)
+# 5. vehicle and log changing direction with time(not sure if it counts)
+# 6. showing score on top of screen(hard)
+# 7. retry(ez)
+# Any additional information that the TA needs to know:
+# - (write here, if any)
+#
+#####################################################################--------------------------------------------------------------------------------------
+
+.data
+scoreAddress: .word 0
+score: .word 0		#let 3 be the maximum score
+time: .word 0
+orient: .word 2  # orientation 2 for up, -2 for down, 1 for right, -1 for left, 
+displayAddress: .word 0x10008000
+deathCounter: .word 0
+# frog positions
+# when updating the below two data, 
+frog_start_x: .word 15
+frog_start_y: .word 29
+frog_x: .word 15	# 15 + 3 = 18£¬ the default position is at the bottom middle
+frog_y: .word 29	# 29 + 3 = 32
+#v for vehicles
+v1_x: .word 0
+v1_y: .word 20
+
+v1_x_o: .word 0
+v1_y_o: .word 20
+
+v2_x: .word 14
+v2_y: .word 23
+
+v2_x_o: .word 14
+v2_y_o: .word 23
+#l for logs
+l1_x: .word 0
+l1_x_o: .word 0
+l1_y: .word 8
+
+l2_x: .word 8
+l2_x_o: .word 8
+l2_y: .word 12
+
+#starting position for life printing
+life_x: .word 0
+life_y: .word 0
+life_add: .word 0
+ 
+red: .word 0xff0000 
+green: .word 0x00ff00 
+blue: .word 0x0000ff
+yellow: .word 0xffff00
+.text
+main:
+############## initialization for variables
+li $s1, 0
+sw $s1, score
+sw $s1, deathCounter
+lw $t0, displayAddress # $t0 stores the base address for display
+addi $t1, $t0, 60
+sw $t1, scoreAddress
+li $t1, 0xff0000 	# $t1 stores the red colour code
+li $t2, 0x00ff00 	# $t2 stores the green colour code
+li $t3, 0x0000ff 	# $t3 stores the blue colour code
+add $t4,$t1,$t2 	# set $t4 = $t1+ $t2 ($t4 be yellow)
+
+############## hard_coded map
+draw_goal_area:
+#setting parameters for address_converter
+addi $a1, $zero, 0	#starting point of top safe
+addi $a0, $zero, 0
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal address_converter
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+
+addi $a1, $zero, 32	# set width 32
+addi $a0, $zero, 8	# height 8
+add $a2, $zero, $t4	#set colour to be yellow
+
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal draw_rectangle
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+
+
+#central loop starts here:
+start:
+
+
+addi $a1, $zero, 0	#starting pos c
+addi $a0, $zero, 26	#starting pos r
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal address_converter
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+
+addi $a1, $zero, 32	# set width 32
+addi $a0, $zero, 6	# height 6
+add $a2, $zero, $t2	#set colour to be green
+li $a2, 0x00ff00
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal draw_rectangle
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+
+jal check_keyboard
+
+back_to_game:
+li $t1, 0xff0000 	# $t1 stores the red colour code
+li $t2, 0x00ff00 	# $t2 stores the green colour code
+li $t3, 0x0000ff 	# $t3 stores the blue colour code
+add $t4,$t1,$t2 
+jal draw_background
+#update car positions
+#draw the vehicles
+jal draw_v1	
+#update v1_x
+	jal update_v1_x
+
+jal draw_v2
+#update v2_x
+	jal update_v2_x
+jal draw_l2
+	jal update_l2_x
+#draw the logs
+jal draw_l1
+	jal update_l1_x
+#draw the frog
+jal draw_frog
+
+
+
+
+#check collision
+
+jal check_collision
+#display lives remaining
+jal display_life
+jal print_score
+#sleep
+li $v0, 32
+li $a0, 50
+
+syscall
+jal time_check
+#jal print_score
+j start
+
+#check collision
+#update the locations of other objects
+#paint according to the new positions:
+#background first
+#then objects
+#then the frog
+#sleep
+#central loop ends here
+
+#ending
+Exit:
+li $t4, 0x000000	# $t4 stores the white colour
+add $a2, $zero, $t4	#set a2 colour to be white
+lw $t5, displayAddress
+#line1
+#print the first row of 1
+sw $a2, 4($t5)
+addi $t5, $t5, 128  # line2
+sw $a2, 0($t5)
+sw $a2, 8($t5)
+addi $t5, $t5, 128  # line3
+sw $a2, 0($t5)
+sw $a2, 8($t5)
+addi $t5, $t5, 128 #line4
+sw $a2, 0($t5)
+sw $a2, 8($t5)
+addi $t5, $t5,128#line5
+sw $a2, 4($t5)
+sw $a2, 8($t5)
+
+#check key board val, if it is r then go back from the beginning,
+lw $t2, 0xffff0004 #load k_input
+beq $t2, 114, main	# is W?
+j Exit
+
+li $v0, 10 # terminate the program gracefully
+syscall
+
+#function area:---------------------------------------------------------------------------------------------------------------------------------
+
+##################### draw rectangle: calling draw_line with the same a1 but repeat with different t0s
+#(r,c) = (a0,a1)
+# colour = a2
+# to make a full line u use width 32,
+# to make a full column u use height 32,
+# never set any parameters to 0 when u are draw rec
+draw_rectangle:
+add $t6, $zero, $zero		# Set index value ($t6) to zero
+draw_rectangle_loop:
+beq $t6, $a0, end_draw_rec 	# If $t6 == height ($a0), jump to end
+				# call draw_line so there would be a line at location
+
+# Draw a line:  the length at a1, and the starting point at t0
+draw_line:
+add $t5, $zero, $zero		# Set index value ($t5) to zero
+draw_line_loop:
+beq $t5, $a1, end_draw_line  # If $t5 == width ($a1), jump to end
+sw $a2, 0($t0)			#   - Draw a pixel at memory location $t0
+addi $t0, $t0, 4		#   - Increment $t0 by 4
+addi $t5, $t5, 1		#   - Increment $t5 by 1
+j draw_line_loop		#   - Jump to start of line drawing loop
+end_draw_line:
+
+sll $t7, $a1, 2			# shift back 4 * a1
+addi $t0, $t0, 128		# move to the next line
+sub $t0, $t0, $t7		# shift back to left
+addi $t6, $t6, 1		# t6 = t6 + 1
+j draw_rectangle_loop		# back to the draw rec loop
+
+end_draw_rec:		
+lw $t0, displayAddress 		# -restore value of t0 to the base address
+jr $ra				# back to the calling program
+###############################################################
+############	-function address converter
+address_converter:		# -address converter takes in (r,c) row and column
+				# from a0, and a1, both < 64 and translate them into
+				# the address in bitmap, store it in t0
+				
+sll $a1, $a1, 2			# translating column value	4 = 2^2
+sll $a0, $a0, 7			# translating row value		128 = 2^7
+add $t0, $t0, $a1 		# t0 = t0 + 4 * c
+add $t0, $t0, $a0 		# t0 = t0 + 128 * r
+jr $ra
+########################################
+########	-function draw frog
+draw_frog:			# a hard coded frog, rectangle of 3x3 for now	
+# uses variable frog_x and frog_y as the top left corner
+#setting parameters for address_converter
+lw $a1, frog_x
+lw $a0, frog_y
+
+
+li $t4, 0xff00ff	# $t4 stores the magneta colour
+add $a2, $zero, $t4	#set a2 colour to be magneta
+
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal address_converter
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+
+sw $a2, 0($t0)		#top left
+
+addi $t0, $t0, 8	# top right
+sw $a2, 0($t0)	
+
+addi $t0, $t0, 128
+addi $t0, $t0, -4
+sw $a2, 0($t0)	
+addi $t0, $t0, 128
+addi $t0, $t0, -4
+sw $a2, 0($t0)	
+addi $t0, $t0, 8
+sw $a2, 0($t0)
+
+#print orientation:
+lw $s5, orient
+beq $s5,2,up
+beq $s5, -2,down
+beq $s5,-1,left
+beq $s5,1,right
+j end_draw_frogg
+
+end_draw_frogg:
+lw $t0, displayAddress # restore t0 value
+jr $ra
+
+down:
+
+addi $t0, $t0, -4
+sw $a2, 0($t0)
+j end_draw_frogg
+left:
+addi $t0, $t0, -128
+addi $t0, $t0, -8
+sw $a2, 0($t0)
+j end_draw_frogg
+j end_draw_frogg
+right:
+addi $t0, $t0, -128
+sw $a2, 0($t0)
+j end_draw_frogg
+j end_draw_frogg
+up:
+addi $t0, $t0, -128
+addi $t0, $t0, -128
+addi $t0, $t0, -4
+sw $a2, 0($t0)
+j end_draw_frogg
+
+draw_v1: 		#given position v_x, v_y, draw the hard coded red vehicles
+lw $a1, v1_x
+lw $a0, v1_y
+
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal address_converter
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+
+addi $a1, $zero, 6	# set width 3
+addi $a0, $zero, 3	# height 3
+li $t4, 0xff0000	# $t4 stores the red colour
+add $a2, $zero, $t4	#set colour to be red
+
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal draw_rectangle
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+###################################
+lw $a1, v1_x
+lw $a0, v1_y
+
+addi $a1, $a1,12 
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal address_converter
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+
+addi $a1, $zero, 6	# set width 3
+addi $a0, $zero, 3	# height 3
+li $t4, 0xff0000	# $t4 stores the red colour
+add $a2, $zero, $t4	#set colour to be red
+
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal draw_rectangle
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+
+jr $ra
+
+draw_v2: 		#given position v_x, v_y, draw the hard coded red vehicles
+lw $a1, v2_x
+lw $a0, v2_y
+
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal address_converter
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+
+addi $a1, $zero, 6	# set width 3
+addi $a0, $zero, 3	# height 3
+li $t4, 0xff0000	# $t4 stores the red colour
+add $a2, $zero, $t4	#set colour to be red
+
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal draw_rectangle
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+###################################
+lw $a1, v2_x
+lw $a0, v2_y
+
+addi $a1, $a1,12 
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal address_converter
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+
+addi $a1, $zero, 6	# set width 3
+addi $a0, $zero, 3	# height 3
+li $t4, 0xff0000	# $t4 stores the red colour
+add $a2, $zero, $t4	#set colour to be red
+
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal draw_rectangle
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+
+jr $ra
+
+draw_l1:
+lw $a1, l1_x
+lw $a0, l1_y
+
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal address_converter
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+
+addi $a1, $zero, 8	# set width 3
+addi $a0, $zero, 5	# height 5
+li $t4, 0x800000	# $t4 stores the red colour
+add $a2, $zero, $t4	#set colour to be red
+
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal draw_rectangle
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+###################################
+lw $a1, l1_x
+lw $a0, l1_y
+
+addi $a1, $a1,12 
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal address_converter
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+
+addi $a1, $zero, 8	# set width 3
+addi $a0, $zero, 5	# height 4
+li $t4, 0x800000	# $t4 stores the red colour
+add $a2, $zero, $t4	#set colour to be red
+
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal draw_rectangle
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+
+jr $ra
+
+draw_l2:
+lw $a1, l2_x
+lw $a0, l2_y
+
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal address_converter
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+
+addi $a1, $zero, 8	# set width 3
+addi $a0, $zero, 5	# height 5
+li $t4, 0x800000	# $t4 stores the red colour
+add $a2, $zero, $t4	#set colour to be red
+
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal draw_rectangle
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+###################################
+lw $a1, l2_x
+lw $a0, l2_y
+
+addi $a1, $a1,12 
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal address_converter
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+
+addi $a1, $zero, 8	# set width 3
+addi $a0, $zero, 5	# height 5
+li $t4, 0x800000	# $t4 stores the red colour
+add $a2, $zero, $t4	#set colour to be red
+
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal draw_rectangle
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+
+jr $ra
+##############################
+check_keyboard:
+lw $t8 0xffff0000	#t8 load if there is keyboard input
+lw $a0, frog_x		# a0 = frog_x
+lw $a1, frog_y		# a1 = frog_y
+add $a3, $zero, $zero	# a3 for y control
+add $a2, $zero, $zero 	# a2 for x control
+
+beq $t8, 0, end_check_k
+sw $zero, 0xffff0000 #reset
+#update positions
+lw $t2, 0xffff0004 #load k_input
+beq $t2, 119, isW	# is W?
+beq $t2, 0x61, isA	# is A?
+beq $t2, 115, isS	# is S?
+beq $t2, 100, isD	# is D?
+beq $t2, 112,isP	# is P?
+j end_check_k
+
+isW:
+li $a3, -3
+addi $s5, $zero, 2
+sw $s5, orient
+add $s6, $zero, $a0 #copy a0 to s6
+li  $v0, 1           # service 1 is print integer
+lw $a0, orient # load desired value into argument register $a0, using pseudo-op
+#syscall
+add $a0, $zero, $s6 #copy s6 to a0
+j end_check_k
+
+isA:
+li $a2, -3
+addi $s5, $zero, -1
+sw $s5, orient
+add $s6, $zero, $a0 #copy a0 to s6
+li  $v0, 1           # service 1 is print integer
+lw $a0, orient # load desired value into argument register $a0, using pseudo-op
+#syscall
+add $a0, $zero, $s6 #copy s6 to a0
+j end_check_k
+
+isS:
+li $a3, 3
+addi $s5, $zero, -2
+sw $s5, orient
+add $s6, $zero, $a0 #copy a0 to s6
+li  $v0, 1           # service 1 is print integer
+lw $a0, orient # load desired value into argument register $a0, using pseudo-op
+#syscall
+add $a0, $zero, $s6 #copy s6 to a0
+j end_check_k
+
+isD:
+li $a2, 3
+addi $s5, $zero, 1
+sw $s5, orient
+add $s6, $zero, $a0 #copy a0 to s6
+li  $v0, 1           # service 1 is print integer
+lw $a0, orient # load desired value into argument register $a0, using pseudo-op
+#syscall
+add $a0, $zero, $s6 #copy s6 to a0
+j end_check_k
+
+isP:
+sw $zero, 0xffff0004 #reset
+#setting parameters for address_converter
+add $s1, $a1, $zero
+add $s2, $a2, $zero
+addi $a1, $zero, 0	#starting point of top safe
+addi $a0, $zero, 0
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal address_converter
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+
+addi $a1, $zero, 32	# set width 32
+addi $a0, $zero, 32	# height 8
+li $a2, 0xffff00	#set colour to be yellow
+
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal draw_rectangle
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+
+add $a1, $s1, $zero
+add $a2, $s2, $zero
+
+#read the keyboard input here, if it is P we get out!
+lw $t2, 0xffff0004 #load k_input
+addi $s3, $zero, 112
+beq $t2, $s3, check_keyboard
+j isP
+
+end_check_k:
+add $a0, $a0, $a2
+add $a1, $a1, $a3
+
+# you might wanna fix some edge behaviour later
+#but for now just store them to the variables
+sw $a0, frog_x
+sw $a1, frog_y
+sw $zero, 0xffff0004 #reset
+
+jr $ra
+
+#draw the  top safe area: ---------------------------------------------------------------
+draw_background:
+draw_starting_area:
+addi $a1, $zero, 0	#starting pos c
+addi $a0, $zero, 26	#starting pos r
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal address_converter
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+
+addi $a1, $zero, 32	# set width 32
+addi $a0, $zero, 6	# height 6
+add $a2, $zero, $t2	#set colour to be green
+li $a2, 0x00ff00
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal draw_rectangle
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+
+#draw the ground
+addi $a1, $zero, 0	#starting pos c
+addi $a0, $zero, 20	#starting pos r
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal address_converter
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+
+addi $a1, $zero, 32	# set width 32
+addi $a0, $zero, 6	# height 6
+add $a2, $zero, $t2	#set colour to be green
+li $a2, 0x808080
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal draw_rectangle
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+
+draw_water:
+addi $a1, $zero, 0	#starting pos c
+addi $a0, $zero, 8	#starting pos r
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal address_converter
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+
+addi $a1, $zero, 32	# set width 32
+addi $a0, $zero, 9	# height 6
+add $a2, $zero, $t2	#set colour to be green
+li $a2, 0x0000ff
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal draw_rectangle
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+
+draw_middle_safe_area:
+addi $a1, $zero, 0	#starting pos c
+addi $a0, $zero, 17	#starting pos r
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal address_converter
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+
+addi $a1, $zero, 32	# set width 32
+addi $a0, $zero, 3	# height 6
+add $a2, $zero, $t2	#set colour to be green
+li $a2, 0x00ff00
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal draw_rectangle
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+
+jr $ra
+
+###################################
+check_collision:
+lw $a1, frog_x
+lw $a0, frog_y
+
+
+li $t4, 0xffffff	# $t4 stores the magneta colour
+add $a2, $zero, $t4	#set a2 colour to be white
+
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal address_converter
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+
+#t0 is now pointed to the top left of the frog.
+#tomorrow you will check the pixel below t0, which is the middle left and then check middle right
+#about the colour, you fetch colour value from those adresses, compare, make branches
+#and set the frog back to spawn if needed.
+
+#sw $a2, 0($t0)		#top left becomes white
+check_middle_left:
+li $t1, 0xff0000 	# $t1 stores the red colour code
+li $t2, 0xffff00 	# $t2 stores the yellow colour code
+li $t3, 0x0000ff 	# $t3 stores the blue colour code
+addi $t0, $t0, 128
+lw $t6, 0($t0)		#check middle left colour and save it to t6
+
+lw $t5, displayAddress # $t0 stores the base address for display
+
+sw $t6, 0($t5)		#let the top left of the map shows the colour being detected	detection blocks here!!!!!
+beq $t6, $t1, is_R
+beq $t6, $t3, is_R	# is_B     this should be is blue but they have the same behaviour here
+beq $t6, $t2,is_Y	# yellow?
+j check_middle_right
+is_R:
+#tagthis1
+#slowly become all white
+
+sw $a2, 0($t0)		#top left
+#sleep
+li $v0, 32
+li $a0, 100
+syscall
+addi $t0, $t0,4
+sw $a2, 0($t0)	
+li $v0, 32
+li $a0, 100
+syscall
+addi $t0, $t0,4
+sw $a2, 0($t0)	
+li $v0, 32
+li $a0, 100
+syscall
+addi $t0, $t0,120
+sw $a2, 0($t0)	
+li $v0, 32
+li $a0, 100
+syscall
+addi $t0, $t0,4
+sw $a2, 0($t0)	
+li $v0, 32
+li $a0, 100
+syscall
+addi $t0, $t0,4
+sw $a2, 0($t0)	
+li $v0, 32
+li $a0, 100
+syscall
+addi $t0, $t0,120
+sw $a2, 0($t0)	
+li $v0, 32
+li $a0, 100
+syscall
+
+lw $s2, deathCounter
+addi $s2, $s2, 1
+sw $s2, deathCounter
+addi $s3, $zero, 3
+lw $t4, frog_start_x		#block of code that send frog back to spawn
+sw $t4, frog_x
+lw $t4, frog_start_y
+sw $t4, frog_y
+beq $s2, $s3, Exit		#die three times, end of the game
+
+
+j end_check_c
+
+is_Y:
+li $s5, 0xff00ff		#s5 be magneta
+sw $s5, 0($t0)
+lw $t4, frog_start_x		#block of code that send frog back to spawn
+sw $t4, frog_x
+lw $t4, frog_start_y
+sw $t4, frog_y
+lw $s1, score
+addi $s1, $s1, 1
+sw $s1, score
+
+j end_check_c
+check_middle_right:
+addi $t0, $t0, 	8	# move the pointer to middle right
+lw $t6, 0($t0)		#check middle left colour and save it to t6			detection blocks here!!!!!!
+sw $t6, 8($t5)
+beq $t6, $t1, is_R
+beq $t6, $t3, is_R	# is_B     this should be is blue but they have the same behaviour here
+beq $t6, $t2,is_Y	# yellow?
+j end_check_c
+
+end_check_c:
+jr $ra
+
+update_v1_x:
+lw $t8, v1_x
+lw $t5, v2_x_o
+addi $t5, $t5,96
+beq $t8, $t5, v1_fix
+addi $t8, $t8,1
+sw $t8, v1_x
+
+end_update_v1_x:
+jr $ra
+v1_fix:
+lw $s5, v1_x_o
+sw $s5, v1_x
+j end_update_v1_x
+
+update_v2_x:
+lw $t8, v2_x
+lw $t5, v1_x_o 
+subi $t5, $t5,96
+beq $t8, $t5, v2_fix
+addi $t8, $t8, -1
+sw $t8, v2_x
+end_update_v2_x:
+jr $ra
+v2_fix:
+lw $s5, v2_x_o
+sw $s5, v2_x
+j end_update_v2_x
+
+update_l1_x:
+lw $t8, l1_x
+lw $t5, l2_x_o
+addi $t5, $t5,128
+beq $t8, $t5, l1_fix
+addi $t8, $t8,1
+sw $t8, l1_x
+end_update_l1_x:
+jr $ra
+l1_fix:
+lw $s5, l1_x_o
+sw $s5, l1_x
+j end_update_l1_x
+
+update_l2_x:
+lw $t8, l2_x
+lw $t5, l1_x_o
+subi $t5, $t5, 128
+beq $t8,$t5, l2_fix
+addi $t8, $t8,-1
+sw $t8, l2_x
+
+end_update_l2_x:
+jr $ra
+
+l2_fix:
+lw $s5, l2_x_o
+sw $s5, l2_x
+j end_update_l2_x
+
+# function display life only supports life from 3 to 0 because life printing to the screen is hard coded
+display_life:
+#first refresh the drawing area
+#setting parameters for address_converter
+lw $t0, displayAddress
+addi $a1, $zero, 3	# set width 3
+addi $a0, $zero, 5	# height 5
+li $a2, 0xffff00	#set colour to be yellow
+
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal draw_rectangle
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+
+#calculate the life remaining by r = 3 - deathCounter
+lw $t8, deathCounter
+addi $t7, $zero, 3
+sub $t6, $t7, $t8    # a0 store the sc, get print also
+
+add $a0, $zero, $t6
+li $v0,1           # service 1 is print integer
+  # load desired value into argument register $a0, using pseudo-op
+syscall		#print the life remaining just for debugging
+beq $a0, 3, L_3
+beq $a0, 2, L_2
+beq $a0, 1, L_1
+beq $a0, 0, L_0
+j end_display_life
+L_3:# a hard coded number 3
+li $t4, 0x000000	# $t4 stores the white colour
+add $a2, $zero, $t4	#set a2 colour to be white
+lw $t5, displayAddress
+#line1
+#print the first row of 3
+sw $a2, 0($t5)
+sw $a2, 4($t5)
+addi $t5, $t5, 128  # line2
+sw $a2, 4($t5)
+addi $t5, $t5, 128  # line3
+sw $a2, 0($t5)
+sw $a2, 4($t5)
+addi $t5, $t5, 128 #line4
+sw $a2, 4($t5)
+addi $t5, $t5,128#line5
+sw $a2, 0($t5)
+sw $a2, 4($t5)
+
+j end_display_life
+L_2:
+li $t4, 0x000000	# $t4 stores the white colour
+add $a2, $zero, $t4	#set a2 colour to be white
+lw $t5, displayAddress
+#line1
+#print the first row of 2
+sw $a2, 0($t5)
+sw $a2, 4($t5)
+addi $t5, $t5, 128  # line2
+sw $a2, 4($t5)
+addi $t5, $t5, 128  # line3
+sw $a2, 0($t5)
+sw $a2, 4($t5)
+addi $t5, $t5, 128 #line4
+sw $a2, 0($t5)
+addi $t5, $t5,128#line5
+sw $a2, 0($t5)
+sw $a2, 4($t5)
+j end_display_life
+L_1:
+li $t4, 0x000000	# $t4 stores the white colour
+add $a2, $zero, $t4	#set a2 colour to be white
+lw $t5, displayAddress
+#line1
+#print the first row of 1
+sw $a2, 0($t5)
+addi $t5, $t5, 128  # line2
+sw $a2, 0($t5)
+addi $t5, $t5, 128  # line3
+sw $a2, 0($t5)
+addi $t5, $t5, 128 #line4
+sw $a2, 0($t5)
+addi $t5, $t5,128#line5
+sw $a2, 0($t5)
+j end_display_life
+L_0:
+li $t4, 0x000000	# $t4 stores the white colour
+add $a2, $zero, $t4	#set a2 colour to be white
+lw $t5, displayAddress
+#line1
+#print the first row of 1
+sw $a2, 4($t5)
+sw $a2, 8($t5)
+addi $t5, $t5, 128  # line2
+sw $a2, 0($t5)
+sw $a2, 32($t5)
+addi $t5, $t5, 128  # line3
+sw $a2, 0($t5)
+sw $a2, 32($t5)
+addi $t5, $t5, 128 #line4
+sw $a2, 0($t5)
+sw $a2, 32($t5)
+addi $t5, $t5,128#line5
+sw $a2, 4($t5)
+sw $a2, 8($t5)
+j end_display_life
+end_display_life:
+jr $ra
+
+time_check:
+lw $s1, time
+addi $s1, $s1, 1
+sw $s1, time
+addi $s2, $zero, 1000
+beq $s1,$s2,Exit
+jr $ra
+#=============================================================
+print_score:
+#first refresh the drawing area
+#setting parameters for address_converter
+lw $t0, displayAddress
+addi $t0, $t0, 60
+addi $a1, $zero, 3	# set width 3
+addi $a0, $zero, 5	# height 5
+li $a2, 0xffff00	#set colour to be yellow
+
+addi $sp, $sp, -4	# save $ra onto the stack
+sw $ra, 0($sp)
+jal draw_rectangle
+lw $ra, 0($sp)		# restore $ra
+addi $sp, $sp, 4		# move the stack pointer
+
+#calculate the life remaining by r = 3 - deathCounter
+lw $t6, score
+add $a0, $zero, $t6
+li $v0,1           # service 1 is print integer
+  # load desired value into argument register $a0, using pseudo-op
+syscall		#print the life remaining just for debugging
+beq $a0, 3, S_3
+beq $a0, 2, S_2
+beq $a0, 1, S_1
+beq $a0, 0, S_0
+j end_print_score
+
+S_3:# a hard coded number 3
+li $t4, 0x000000	# $t4 stores the white colour
+add $a2, $zero, $t4	#set a2 colour to be white
+lw $t5, scoreAddress
+#line1
+#print the first row of 3
+sw $a2, 0($t5)
+sw $a2, 4($t5)
+addi $t5, $t5, 128  # line2
+sw $a2, 4($t5)
+addi $t5, $t5, 128  # line3
+sw $a2, 0($t5)
+sw $a2, 4($t5)
+addi $t5, $t5, 128 #line4
+sw $a2, 4($t5)
+addi $t5, $t5,128#line5
+sw $a2, 0($t5)
+sw $a2, 4($t5)
+
+j Exit
+S_2:
+li $t4, 0x000000	# $t4 stores the white colour
+add $a2, $zero, $t4	#set a2 colour to be white
+lw $t5, scoreAddress
+#line1
+#print the first row of 2
+sw $a2, 0($t5)
+sw $a2, 4($t5)
+addi $t5, $t5, 128  # line2
+sw $a2, 4($t5)
+addi $t5, $t5, 128  # line3
+sw $a2, 0($t5)
+sw $a2, 4($t5)
+addi $t5, $t5, 128 #line4
+sw $a2, 0($t5)
+addi $t5, $t5,128#line5
+sw $a2, 0($t5)
+sw $a2, 4($t5)
+j end_print_score
+S_1:
+li $t4, 0x000000	# $t4 stores the white colour
+add $a2, $zero, $t4	#set a2 colour to be white
+lw $t5, scoreAddress
+#line1
+#print the first row of 1
+sw $a2, 0($t5)
+addi $t5, $t5, 128  # line2
+sw $a2, 0($t5)
+addi $t5, $t5, 128  # line3
+sw $a2, 0($t5)
+addi $t5, $t5, 128 #line4
+sw $a2, 0($t5)
+addi $t5, $t5,128#line5
+sw $a2, 0($t5)
+j end_print_score
+S_0:
+li $t4, 0x000000	# $t4 stores the white colour
+add $a2, $zero, $t4	#set a2 colour to be white
+lw $t5, scoreAddress
+#line1
+#print the first row of 1
+sw $a2, 4($t5)
+sw $a2, 8($t5)
+addi $t5, $t5, 128  # line2
+sw $a2, 0($t5)
+sw $a2, 12($t5)
+addi $t5, $t5, 128  # line3
+sw $a2, 0($t5)
+sw $a2, 12($t5)
+addi $t5, $t5, 128 #line4
+sw $a2, 0($t5)
+sw $a2, 12($t5)
+addi $t5, $t5,128#line5
+sw $a2, 4($t5)
+sw $a2, 8($t5)
+j end_print_score
+end_print_score:
+jr $ra
+
+
+
+
